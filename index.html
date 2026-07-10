@@ -167,7 +167,11 @@ document.getElementById('mailBtn').addEventListener('click', ()=>{
   const text = summary();
   const subject = 'GYM LOG '+TODAY;
   const addr = ['goode','kelvin'].join('.')+String.fromCharCode(64)+['gmail','com'].join('.');
-  window.location.href = 'mailto:'+addr+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(text);
+  const params = 'to='+addr+'&subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(text);
+  // Open the Gmail app; fall back to mailto: if Gmail isn't installed
+  const started = Date.now();
+  window.location.href = 'googlegmail://co?'+params;
+  setTimeout(()=>{ if(!document.hidden && Date.now()-started < 2100) window.location.href = 'mailto:'+addr+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(text); }, 1500);
   toast('Send it — Claude picks it up at 8 PM');
 });
 document.getElementById('clearBtn').addEventListener('click', ()=>{
