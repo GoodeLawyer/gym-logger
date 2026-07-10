@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>KG Gym Logger</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; background:#f6f7f9; color:#1a1f26; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { max-width:520px; margin:0 auto; padding:14px 14px 90px; }
+  h1 { font-size:18px; margin:4px 0 0; }
+  .sub { color:#6b7480; font-size:13px; margin:2px 0 12px; }
+  .tag { display:inline-block; font-size:12px; font-weight:700; padding:4px 12px; border-radius:20px; background:rgba(232,115,28,.14); color:#e8731c; margin:2px 0 10px; }
+  .card { background:#fff; border:1px solid #e5e8ec; border-radius:14px; padding:14px; margin-bottom:12px; }
+  .exname { font-weight:700; font-size:15px; }
+  .target { color:#6b7480; font-size:12px; margin-left:6px; font-weight:600; }
+  .setrow { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .setlbl { width:40px; font-size:12px; font-weight:700; color:#6b7480; flex-shrink:0; }
+  .setlbl.wu { color:#2563eb; }
+  input[type=text] { width:100%; border:1px solid #d7dbe1; border-radius:10px; padding:10px 12px; font-size:16px; background:#fbfcfd; }
+  input:focus { outline:2px solid #e8731c33; border-color:#e8731c; }
+  .half { flex:1; min-width:0; }
+  .unit { font-size:11px; color:#9aa2ac; width:26px; flex-shrink:0; }
+  .daily { display:flex; gap:8px; flex-wrap:wrap; }
+  .daily .field { flex:1; min-width:100px; }
+  .field label { display:block; font-size:11px; font-weight:700; color:#6b7480; text-transform:uppercase; letter-spacing:.4px; margin-bottom:4px; }
+  .toggle { display:flex; align-items:center; gap:8px; border:1px solid #d7dbe1; border-radius:10px; padding:10px 12px; font-size:14px; background:#fbfcfd; user-select:none; cursor:pointer; }
+  .toggle.on { background:#eef7f0; border-color:#bfe3c8; color:#15a34a; font-weight:700; }
+  .daysel { display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:8px; }
+  .daysel button { border:1px solid #d7dbe1; background:#fff; border-radius:20px; padding:6px 12px; font-size:12px; font-weight:700; color:#6b7480; flex-shrink:0; }
+  .daysel button.on { background:#1a1f26; color:#fff; border-color:#1a1f26; }
+  .bar { position:fixed; bottom:0; left:0; right:0; background:#ffffffee; backdrop-filter:blur(8px); border-top:1px solid #e5e8ec; padding:10px 14px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; max-width:100%; }
+  .bar button { flex:1; border:none; border-radius:12px; padding:14px 10px; font-size:15px; font-weight:800; cursor:pointer; }
+  #copyBtn { background:#e8731c; color:#fff; }
+  #shareBtn { background:#1a1f26; color:#fff; }
+  #clearBtn { flex:0 0 auto; background:#fff; border:1px solid #d7dbe1; color:#6b7480; padding:14px 14px; }
+  .note { font-size:12px; color:#6b7480; margin-top:4px; }
+  #toast { position:fixed; bottom:86px; left:50%; transform:translateX(-50%); background:#15a34a; color:#fff; font-weight:700; font-size:14px; padding:10px 18px; border-radius:24px; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap; }
+  #out { width:100%; margin-top:10px; height:120px; border-radius:10px; border:1px solid #d7dbe1; font-family:ui-monospace,Menlo,monospace; font-size:12px; padding:8px; display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏋️ KG Gym Logger</h1>
+  <div class="sub" id="dateLine"></div>
+  <div class="daysel" id="daysel"></div>
+  <div id="app"></div>
+  <textarea id="out" readonly></textarea>
+  <div class="note">Auto-saves on this phone as you type. When done: tap <b>✉️ Email log</b> and hit send — Claude reads it from your inbox at 8 PM and updates your log + dashboard automatically. (Copy → paste to any Claude chat also works.)</div>
+</div>
+<div class="bar">
+  <button id="mailBtn">✉️ Email log</button>
+  <button id="copyBtn">📋 Copy</button>
+  <button id="clearBtn">✕</button>
+</div>
+<div id="toast"></div>
+
+<script>
+// name | working sets | target | wu? (warm-up row shown)
+const PLAN = {
+  1:['Chest+Triceps',[
+    ['Incline Press (Machine)',3,'8-10',1],['Chest Press (Machine)',3,'10',1],['Cable Chest Fly',3,'12-15',0],
+    ['Triceps Rope Pushdown',3,'12',0],['Overhead Cable Triceps Extension',2,'12',0],
+    ['Cable Crunch',3,'12',0],['Hanging Knee Raise',3,'10',0],['Plank',3,'45 sec',0]]],
+  2:['Back+Biceps+Forearms',[
+    ['Lat Pulldown',3,'10',1],['Chest-Supported Row',3,'10',1],['Dumbbell Curl',3,'10',0],
+    ['Hammer Curl',3,'12',0],['Reverse EZ-Bar Curl',2,'15',0],['Wrist Curls',2,'20',0],
+    ['Farmer\'s Carry',2,'40 yd',0],['Machine Crunch',3,'12',0],['Dead Bug',3,'10',0]]],
+  3:['Legs',[
+    ['Leg Press',3,'10',1],['DB Romanian Deadlift',3,'10',1],['Leg Curl',3,'12',0],
+    ['Leg Extension',3,'12',0],['Standing Calf Raise',3,'15',0],['Pancake Stretch Session',1,'20 min',0]]],
+  4:['Shoulders+Chest',[
+    ['Shoulder Press (Machine)',3,'10',1],['Lateral Raise',3,'12-15',0],['Incline Press (Machine)',3,'10',1],
+    ['Low-to-High Cable Fly',3,'12',0],['Rear Delt Fly',3,'15',0],
+    ['Cable Crunch',3,'12',0],['Hanging Knee Raise',3,'10',0],['Plank',3,'45 sec',0]]],
+  5:['Arms+Conditioning',[
+    ['Dumbbell Curl',3,'12',0],['Triceps Rope Pushdown',3,'12',0],['Hammer Curl',3,'12',0],
+    ['Reverse EZ-Bar Curl',2,'15',0],['Wrist Curls',2,'20',0],['Farmer\'s Carry',2,'40 yd',0],
+    ['Incline Treadmill Walk',1,'20 min · 12% · 3.0',0]]],
+  6:['Recovery',[['Pancake Stretch Routine',1,'10 min',0],['Walk',1,'8-10k steps',0]]],
+  0:['Recovery + Weigh-In',[['Easy Walk',1,'30-45 min',0],['Pancake Stretch Routine',1,'10 min',0]]],
+};
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function isoToday(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+const TODAY = isoToday();
+let dow = new Date().getDay();
+const KEY = () => 'kglog-'+TODAY+'-'+dow;
+
+let state = {};
+function load(){ try { state = JSON.parse(localStorage.getItem(KEY())) || {}; } catch(e){ state = {}; } }
+function save(){ try { localStorage.setItem(KEY(), JSON.stringify(state)); } catch(e){} }
+
+function inputRow(lbl, cls, wkey, rkey, repPh){
+  const w = state[wkey]||'', r = state[rkey]||'';
+  return `<div class="setrow"><span class="setlbl ${cls}">${lbl}</span>
+    <input class="half" type="text" inputmode="decimal" placeholder="weight" data-k="${wkey}" value="${w}"><span class="unit">lb</span>
+    <input class="half" type="text" inputmode="numeric" placeholder="${repPh}" data-k="${rkey}" value="${r}"><span class="unit">reps</span></div>`;
+}
+
+function render(){
+  const [focus, exs] = PLAN[dow];
+  document.getElementById('dateLine').textContent = new Date().toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'});
+  document.getElementById('daysel').innerHTML = [1,2,3,4,5,6,0].map(d =>
+    `<button class="${d===dow?'on':''}" data-d="${d}">${DAYS[d]} · ${PLAN[d][0]}</button>`).join('');
+
+  let h = `<div class="tag">${focus}</div>
+  <div class="card"><div class="daily">
+    <div class="field"><label>Weight this AM</label><input type="text" inputmode="decimal" placeholder="lb" data-k="bw" value="${state.bw||''}"></div>
+    <div class="field"><label>Protein ~170g</label><div class="toggle ${state.protein?'on':''}" data-t="protein">${state.protein?'✓ hit':'tap when hit'}</div></div>
+    <div class="field"><label>Stretch</label><div class="toggle ${state.stretch?'on':''}" data-t="stretch">${state.stretch?'✓ done':'tap when done'}</div></div>
+  </div></div>`;
+
+  exs.forEach((ex,i)=>{
+    const [name, sets, target, wu] = ex;
+    h += `<div class="card"><span class="exname">${name}</span><span class="target">${sets}×${target}</span>`;
+    if(wu) h += inputRow('WU','wu', `e${i}wuw`, `e${i}wur`, 'reps');
+    for(let s=1; s<=sets; s++) h += inputRow('Set '+s,'', `e${i}s${s}w`, `e${i}s${s}r`, target);
+    h += `</div>`;
+  });
+  document.getElementById('app').innerHTML = h;
+
+  document.querySelectorAll('input[data-k]').forEach(el=>{
+    el.addEventListener('input', ()=>{ state[el.dataset.k]=el.value.trim(); save(); });
+  });
+  document.querySelectorAll('.toggle').forEach(el=>{
+    el.addEventListener('click', ()=>{ state[el.dataset.t]=!state[el.dataset.t]; save(); render(); });
+  });
+  document.querySelectorAll('.daysel button').forEach(el=>{
+    el.addEventListener('click', ()=>{ dow=+el.dataset.d; load(); render(); });
+  });
+}
+
+function summary(){
+  const [focus, exs] = PLAN[dow];
+  let lines = [`GYM LOG ${TODAY} (${focus})`];
+  const daily = [];
+  if(state.bw) daily.push('weight '+state.bw);
+  daily.push('protein '+(state.protein?'✓':'—'));
+  daily.push('stretch '+(state.stretch?'✓':'—'));
+  lines.push(daily.join(' | '));
+  exs.forEach((ex,i)=>{
+    const [name, sets, , wu] = ex;
+    const parts = [];
+    if(wu && (state[`e${i}wuw`]||state[`e${i}wur`])) parts.push('WU '+(state[`e${i}wuw`]||'?')+'x'+(state[`e${i}wur`]||'?'));
+    const work = [];
+    for(let s=1; s<=sets; s++){
+      const w=state[`e${i}s${s}w`], r=state[`e${i}s${s}r`];
+      if(w||r) work.push((w||'?')+'x'+(r||'?'));
+    }
+    if(work.length) parts.push(work.join(', '));
+    if(parts.length) lines.push(name+': '+parts.join(' · '));
+  });
+  return lines.join('\n');
+}
+
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.opacity=1; setTimeout(()=>t.style.opacity=0, 1800); }
+
+document.getElementById('copyBtn').addEventListener('click', async ()=>{
+  const text = summary();
+  const out = document.getElementById('out');
+  try { await navigator.clipboard.writeText(text); toast('Copied — paste it to Claude'); }
+  catch(e){ out.style.display='block'; out.value=text; out.select(); try{ document.execCommand('copy'); toast('Copied'); }catch(e2){ toast('Select & copy below'); } }
+});
+document.getElementById('mailBtn').addEventListener('click', ()=>{
+  const text = summary();
+  const subject = 'GYM LOG '+TODAY;
+  const addr = ['goode','kelvin'].join('.')+String.fromCharCode(64)+['gmail','com'].join('.');
+  window.location.href = 'mailto:'+addr+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(text);
+  toast('Send it — Claude picks it up at 8 PM');
+});
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  if(confirm('Clear today\'s entries?')){ state={}; save(); render(); }
+});
+
+load(); render();
+</script>
+</body>
+</html>
