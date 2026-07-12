@@ -69,7 +69,7 @@ const PLAN = {
     ['Farmer\'s Carry',2,'40 yd',0],['Machine Crunch',3,'12',0],['Dead Bug',3,'10',0]]],
   3:['Legs',[
     ['Leg Press',3,'10',1],['DB Romanian Deadlift',3,'10',1],['Leg Curl',3,'12',0],
-    ['Leg Extension',3,'12',0],['Standing Calf Raise',3,'15',0],['Pancake Stretch Session',1,'20 min',0]]],
+    ['Leg Extension',3,'12',0],['Standing Calf Raise',3,'15',0],['Pancake Stretch Session',1,'20 min',0,'toggle']]],
   4:['Shoulders+Chest',[
     ['Shoulder Press (Machine)',3,'10',1],['Lateral Raise',3,'12-15',0],['Incline Press (Machine)',3,'10',1],
     ['Low-to-High Cable Fly',3,'12',0],['Rear Delt Fly',3,'15',0],
@@ -77,9 +77,9 @@ const PLAN = {
   5:['Arms+Conditioning',[
     ['Dumbbell Curl',3,'12',0],['Triceps Rope Pushdown',3,'12',0],['Hammer Curl',3,'12',0],
     ['Reverse EZ-Bar Curl',2,'15',0],['Wrist Curls',2,'20',0],['Farmer\'s Carry',2,'40 yd',0],
-    ['Incline Treadmill Walk',1,'20 min · 12% · 3.0',0]]],
-  6:['Recovery',[['Pancake Stretch Routine',1,'10 min',0],['Walk',1,'8-10k steps',0]]],
-  0:['Recovery + Weigh-In',[['Easy Walk',1,'30-45 min',0],['Pancake Stretch Routine',1,'10 min',0]]],
+    ['Incline Treadmill Walk',1,'20 min · 12% · 3.0',0,'cardio']]],
+  6:['Recovery',[['Pancake Stretch Routine',1,'10 min',0,'toggle'],['Walk',1,'8-10k steps',0,'mins']]],
+  0:['Recovery + Weigh-In',[['Easy Walk',1,'30-45 min',0,'cardio'],['Pancake Stretch Routine',1,'10 min',0,'toggle']]],
 };
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
@@ -113,10 +113,18 @@ function render(){
   </div></div>`;
 
   exs.forEach((ex,i)=>{
-    const [name, sets, target, wu] = ex;
-    h += `<div class="card"><span class="exname">${name}</span><span class="target">${sets}×${target}</span>`;
-    if(wu) h += inputRow('WU','wu', `e${i}wuw`, `e${i}wur`, 'reps');
-    for(let s=1; s<=sets; s++) h += inputRow('Set '+s,'', `e${i}s${s}w`, `e${i}s${s}r`, target);
+    const [name, sets, target, wu, mode] = ex;
+    h += `<div class="card"><span class="exname">${name}</span><span class="target">${mode?target:sets+'×'+target}</span>`;
+    if(mode==='toggle'){
+      h += `<div class="setrow"><div class="toggle ${state['e'+i+'done']?'on':''}" data-t="e${i}done" style="flex:1;justify-content:center">${state['e'+i+'done']?'✓ done':'tap when done'}</div></div>`;
+    } else if(mode==='cardio' || mode==='mins'){
+      h += `<div class="setrow">`;
+      if(mode==='cardio') h += `<input class="half" type="text" inputmode="decimal" placeholder="incline" data-k="e${i}inc" value="${state['e'+i+'inc']||''}"><span class="unit">%</span>`;
+      h += `<input class="half" type="text" inputmode="numeric" placeholder="mins" data-k="e${i}min" value="${state['e'+i+'min']||''}"><span class="unit">min</span></div>`;
+    } else {
+      if(wu) h += inputRow('WU','wu', `e${i}wuw`, `e${i}wur`, 'reps');
+      for(let s=1; s<=sets; s++) h += inputRow('Set '+s,'', `e${i}s${s}w`, `e${i}s${s}r`, target);
+    }
     h += `</div>`;
   });
   document.getElementById('app').innerHTML = h;
@@ -141,7 +149,11 @@ function summary(){
   daily.push('stretch '+(state.stretch?'✓':'—'));
   lines.push(daily.join(' | '));
   exs.forEach((ex,i)=>{
-    const [name, sets, , wu] = ex;
+    const [name, sets, , wu, mode] = ex;
+    if(mode==='toggle'){ if(state[`e${i}done`]) lines.push(name+': ✓'); return; }
+    if(mode==='cardio'){ const inc=state[`e${i}inc`], m=state[`e${i}min`];
+      if(inc||m) lines.push(name+': '+[inc?inc+'% incline':null, m?m+' min':null].filter(Boolean).join(' · ')); return; }
+    if(mode==='mins'){ const m=state[`e${i}min`]; if(m) lines.push(name+': '+m+' min'); return; }
     const parts = [];
     if(wu && (state[`e${i}wuw`]||state[`e${i}wur`])) parts.push('WU '+(state[`e${i}wuw`]||'?')+'x'+(state[`e${i}wur`]||'?'));
     const work = [];
