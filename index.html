@@ -108,6 +108,8 @@ select{width:100%;height:40px;border:1px solid var(--line);background:var(--surf
 .daily{grid-template-columns:1fr 1fr}
 .daily .full{grid-column:1/-1}
 .kpi .v.small{font-size:18px}
+.pubar{height:8px;background:var(--field);border:1px solid var(--line);border-radius:999px;margin:8px 0 6px;overflow:hidden}
+.pubar span{display:block;height:100%;background:var(--accent)}
 .pgrid{display:grid;gap:4px}
 .pgrid section{min-width:0}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12px;color:var(--muted);margin:6px 2px 0}
@@ -196,7 +198,7 @@ function hasData(doc){
 }
 function trained(doc){
   if(!doc||!doc.ex) return false;
-  return Object.values(doc.ex).some(e=>workSets(e).length) || (doc.plan>=1&&doc.plan<=5&&hasData(doc));
+  return Object.entries(doc.ex).some(([n,e])=>n!=='100 Pushups'&&n!=='Pushup Test'&&workSets(e).length) || (doc.plan>=1&&doc.plan<=5&&hasData(doc));
 }
 
 // ---------- State ----------
@@ -334,6 +336,104 @@ function suggest(def){
   return {w,wuW,best,last,lastTxt,why,stall};
 }
 
+// ---------- 100 Pushups program (hundredpushups.com) ----------
+// PU[week][day] = {rest: seconds, c: [column1 sets, column2 sets, column3 sets]}; the last number of each list is the "+" max-set minimum.
+const PU={
+ 1:{1:{rest:60,c:[[2,3,2,2,3],[6,6,4,4,5],[10,12,7,7,9]]},2:{rest:60,c:[[3,4,2,3,4],[6,8,6,6,7],[10,12,8,8,12]]},3:{rest:60,c:[[4,5,4,4,5],[8,10,7,7,10],[11,15,9,9,13]]}},
+ 2:{1:{rest:60,c:[[4,6,4,4,6],[9,11,8,8,11],[14,14,10,10,15]]},2:{rest:90,c:[[5,6,4,4,7],[10,12,9,9,13],[14,16,12,12,17]]},3:{rest:120,c:[[5,7,5,5,8],[12,13,10,10,15],[16,17,14,14,20]]}},
+ 3:{1:{rest:60,c:[[10,12,7,7,9],[12,17,13,13,17],[14,18,14,14,20]]},2:{rest:90,c:[[10,12,8,8,12],[14,19,14,14,19],[20,25,15,15,25]]},3:{rest:120,c:[[11,13,9,9,13],[16,21,15,15,21],[22,30,20,20,28]]}},
+ 4:{1:{rest:60,c:[[12,14,11,10,16],[18,22,16,16,25],[21,25,21,21,32]]},2:{rest:90,c:[[14,16,12,12,18],[20,25,20,20,28],[25,29,25,25,36]]},3:{rest:120,c:[[16,18,13,13,20],[23,28,23,23,33],[29,33,29,29,40]]}},
+ 5:{1:{rest:60,c:[[17,19,15,15,20],[28,35,25,22,35],[36,40,30,24,40]]},2:{rest:45,c:[[10,10,13,13,10,10,9,25],[18,18,20,20,14,14,16,40],[19,19,22,22,18,18,22,45]]},3:{rest:45,c:[[13,13,15,15,12,12,10,30],[18,18,20,20,17,17,20,45],[20,20,24,24,20,20,22,50]]}},
+ 6:{1:{rest:60,c:[[25,30,20,15,40],[40,50,25,25,50],[45,55,35,30,55]]},2:{rest:45,c:[[14,14,15,15,14,14,10,10,44],[20,20,23,23,20,20,18,18,53],[22,22,30,30,24,24,18,18,58]]},3:{rest:45,c:[[13,13,17,17,16,16,14,14,50],[22,22,30,30,25,25,18,18,55],[26,26,33,33,26,26,22,22,60]]}}
+};
+const PU_KEY='100 Pushups', PU_TEST='Pushup Test', PU_START_COL=1, PU_DAYS=[0,3,5]; // Sun, Wed, Fri
+const PU_TEST_AFTER=[2,4,5,6]; // exhaustion test after these weeks (6 = the 100 final test)
+function puPlace(n,after){
+  // where a test result puts you (weeks/columns from the guide); never sends you back past a block you've finished
+  const col=(n,a,b)=>n<=a?1:(n<=b?2:3);
+  if(after===6&&n>=100) return {done:true};
+  if(n>=46) return {wk:6,col:col(n,50,60)};
+  if(n>=31) return {wk:5,col:col(n,35,40)};
+  if(n>=16) return {wk:after>=4?4:3,col:col(n,20,25)};
+  return {wk:after>=2?2:1,col:col(n,5,10)};
+}
+function puSets(wk,day,col){const d=PU[wk][day]; return {rest:d.rest,sets:d.c[col-1]}}
+function puHit(p){
+  // every prescribed set reached its target (last set: at least the minimum)
+  if(!p||!p.wk) return false;
+  const t=puSets(p.wk,p.day,p.col).sets, s=p.sets||[];
+  return t.every((v,i)=>s[i]&&s[i].r!=null&&s[i].r>=v);
+}
+function puState(before){
+  // replay the log up to (not including) `before` to find the next pushup workout
+  let st={wk:1,day:1,col:PU_START_COL,test:null,done:false,best:0};
+  Object.values(sessions).filter(d=>d.date<before&&d.ex).sort((a,b)=>a.date<b.date?-1:1).forEach(d=>{
+    const t=d.ex[PU_TEST], p=d.ex[PU_KEY];
+    if(t&&t.sets&&t.sets[0]&&t.sets[0].r!=null){
+      const r=t.sets[0].r; st.best=Math.max(st.best,r);
+      const pl=puPlace(r,t.after||0);
+      if(pl.done){st.done=true; st.test=null}
+      else st={...st,wk:pl.wk,day:1,col:pl.col,test:null};
+    }
+    if(p&&p.wk&&(p.sets||[]).some(x=>x&&x.r!=null)){
+      const last=(p.sets||[])[puSets(p.wk,p.day,p.col).sets.length-1]; if(last&&last.r!=null) st.best=Math.max(st.best,last.r);
+      if(puHit(p)){
+        if(p.day<3) st={...st,wk:p.wk,day:p.day+1,col:p.col};
+        else if(PU_TEST_AFTER.includes(p.wk)) st={...st,wk:p.wk,day:3,col:p.col,test:{after:p.wk}};
+        else st={...st,wk:p.wk+1,day:1,col:p.col};
+      } else st={...st,wk:p.wk,day:p.day,col:p.col};
+    }
+  });
+  return st;
+}
+function puToday(){
+  // what today's card shows: today's own entry if there is one, else the next step
+  const st=puState(curDate), e=cur.ex[PU_KEY], t=cur.ex[PU_TEST];
+  if(t) return {mode:'test',after:t.after,st};
+  if(e&&e.wk) return {mode:'work',wk:e.wk,day:e.day,col:e.col,st};
+  if(st.done) return {mode:'done',st};
+  if(st.test) return {mode:'test',after:st.test.after,st};
+  return {mode:'work',wk:st.wk,day:st.day,col:st.col,st};
+}
+function puCardHTML(){
+  const pt=puToday(), st=pt.st;
+  let h=`<div class="exhead"><span class="exname">100 Pushups</span><span class="target">best ${st.best||'—'}</span></div>`;
+  if(pt.mode==='done') return h+`<div class="hint"><div class="t"><b>Goal reached: 100 in a row.</b><span class="why">Keep one day a week of max sets to hold it.</span></div></div>`;
+  if(pt.mode==='test'){
+    const t=cur.ex[PU_TEST], r=t&&t.sets&&t.sets[0]?t.sets[0].r:null;
+    const title=pt.after===6?'Final test: 100 in a row':'Exhaustion test (after Week '+pt.after+')';
+    h+=`<div class="hint"><div class="t"><b>${title}</b><span class="why">Warm up, then one set of as many good-form pushups as you can. Stop when form breaks. Your number sets your next week and column.</span></div></div>`;
+    h+=`<div class="setrow one"><span class="lbl">Max</span>${setInput('pu','test','Pushup test reps','reps',r,null)}<span></span></div>`;
+    if(r!=null){const pl=puPlace(r,pt.after); h+=`<div class="nohist">${pl.done?'That’s 100. Program complete.':'Next: Week '+pl.wk+', Column '+pl.col+'.'}</div>`}
+    return h;
+  }
+  const {rest,sets}=puSets(pt.wk,pt.day,pt.col), e=cur.ex[PU_KEY]||{};
+  h+=`<div class="hint"><div class="t"><b>Week ${pt.wk} · Day ${pt.day} · Column ${pt.col}</b><span class="why">Rest ${rest} seconds between sets. Last set: as many as you can, at least ${sets[sets.length-1]}.</span></div></div>`;
+  sets.forEach((v,s)=>{
+    const x=(e.sets||[])[s]||{}, last=s===sets.length-1;
+    h+=`<div class="setrow one"><span class="lbl">${last?'Max':'Set '+(s+1)}</span>${setInput('pu','s'+s+'-r','Pushups set '+(s+1),'reps',x.r,v)}${chk('pu',s,x.done,'Pushup set '+(s+1)+' done')}</div>`;
+  });
+  if(e.sets&&e.sets.some(x=>x&&x.r!=null)){
+    const ok=puHit({...e,wk:pt.wk,day:pt.day,col:pt.col});
+    const allIn=e.sets.length>=sets.length&&e.sets.slice(0,sets.length).every(x=>x&&x.r!=null);
+    if(allIn) h+=`<div class="nohist">${ok?(pt.day<3?'Done. Next time: Day '+(pt.day+1)+'.':(PU_TEST_AFTER.includes(pt.wk)?'Week done. Next time: exhaustion test.':'Week done. Next time: Week '+(pt.wk+1)+', Day 1.')):'Short of the targets, so next time repeats this day. That’s normal.'}</div>`;
+  }
+  return h;
+}
+function puShowToday(){return PU_DAYS.includes(pdate(curDate).getDay())||!!cur.ex[PU_KEY]||!!cur.ex[PU_TEST]}
+function puEntry(){const pt=puToday(); const e=entry(PU_KEY); e.wk=pt.wk; e.day=pt.day; e.col=pt.col; e.sets=e.sets||[]; return {e,pt}}
+function puInput(k,v){
+  if(k==='test'){const pt=puToday(); const t=entry(PU_TEST); t.after=pt.after; t.sets=[{w:0,r:v}]; return}
+  const m=k.match(/^s(\d+)-r$/); if(!m) return;
+  const {e}=puEntry(); const s=+m[1]; while(e.sets.length<=s) e.sets.push({w:0,r:null}); e.sets[s].r=v; e.sets[s].w=0;
+}
+function puCheck(s){
+  const {e,pt}=puEntry(); const t=puSets(pt.wk,pt.day,pt.col).sets;
+  while(e.sets.length<=s) e.sets.push({w:0,r:null});
+  const x=e.sets[s]; if(!x.done&&x.r==null) x.r=t[s]; x.w=0; x.done=!x.done;
+}
+function rerenderPu(){const c=document.querySelector('#log .card[data-pu]'); if(c) c.innerHTML=puCardHTML()}
+
 // ---------- Log view ----------
 function entry(name){return cur.ex[name]||(cur.ex[name]={})}
 function setInput(i,key,label,unit,val,ph){
@@ -417,6 +517,7 @@ function renderLog(){
       <div class="full"><label>Pancake stretch · 10 min</label><button class="toggle" id="stretchBtn" aria-pressed="${!!cur.stretch}">${cur.stretch?'✓ Done':'Tap when done'}</button></div>
     </div></div>`;
   exs.forEach((def,i)=>{h+=`<div class="card" data-ex="${i}">${cardHTML(def,i)}</div>`});
+  if(puShowToday()) h+=`<div class="card" data-pu="1">${puCardHTML()}</div>`;
   h+=`</div>`;
   el.innerHTML=h;
   exs.forEach((_,i)=>weightPlaceholders(i));
@@ -430,6 +531,7 @@ $('log').addEventListener('input',ev=>{
   const t=ev.target; if(t.tagName!=='INPUT'||t.id==='keyIn') return;
   if(t.dataset.k==='bw'){cur.bw=num(t.value); changed(); return}
   if(t.dataset.k==='bodyFat'){cur.bodyFat=num(t.value); changed(); return}
+  if(t.dataset.i==='pu'){puInput(t.dataset.k,num(t.value)); changed(); return}
   const i=+t.dataset.i, def=exList()[i]; if(!def) return;
   const e=entry(def[0]), k=t.dataset.k;
   if(k==='note'){e.note=t.value; changed(); return}
@@ -452,6 +554,7 @@ $('log').addEventListener('click',ev=>{
     cur.swap=cur.swap||{}; if(next===base[0]) delete cur.swap[base[0]]; else cur.swap[base[0]]=next;
     changed(); rerenderCard(i); return;
   }
+  if(b.dataset.chk!=null&&b.dataset.chk.startsWith('pu:')){puCheck(+b.dataset.chk.split(':')[1]); changed(); rerenderPu(); return}
   if(b.dataset.chk!=null){
     const [is,ss]=b.dataset.chk.split(':'), i=+is, def=exList()[i], e=entry(def[0]);
     const hi=topReps(def[2]);
@@ -480,6 +583,7 @@ $('log').addEventListener('click',ev=>{
     changed(); rerenderCard(i);
   }
 });
+$('log').addEventListener('change',ev=>{if(ev.target.dataset&&ev.target.dataset.i==='pu') rerenderPu()});
 $('days').addEventListener('click',ev=>{
   const b=ev.target.closest('button[data-day]'); if(!b||!cur) return;
   const d=+b.dataset.day; if(d===cur.plan) return;
@@ -585,6 +689,8 @@ function renderProg(){
     h+=`<label for="liftSel" class="nohist">Top working weight per session</label><select id="liftSel">${liftArr.map(n=>`<option${n===liftSel?' selected':''}>${esc(n)}</option>`).join('')}</select><div class="chart">${lineChart(pts,{label:liftSel+' top working weight'})}</div>`;
   }else h+=`<div class="empty">Log a lift to see it here.</div>`;
   h+=`</section>`;
+  {const ps=puState(addDays(TODAY,1)); const pct=Math.min(100,ps.best||0);
+   h+=`<section><h2>100 Pushups</h2><div class="kpi"><div class="k">Best set</div><div class="v">${ps.best||'—'}<span class="s"> / 100</span></div><div class="pubar"><span style="width:${pct}%"></span></div><div class="s">${ps.done?'Goal reached.':ps.test?'Next: '+(ps.test.after===6?'final 100 test':'exhaustion test'):'Next: Week '+ps.wk+', Day '+ps.day+', Column '+ps.col} · Sun, Wed, Fri</div></div></section>`;}
   if(bfs.length>=2) h+=`<section><h2>Body fat</h2><div class="chart">${lineChart(bfs,{label:'Body fat percentage over time',minPad:1})}</div></section>`;
   const prs=prList(docs);
   h+=`<section><h2>Recent PRs</h2><div class="recent">${prs.length?prs.map(p=>`<button data-go="${p.d}"><span>${esc(p.n)}<br><span class="nohist">${fmtLong(p.d)}</span></span><span class="r">${fmtW(p.w)} lb · was ${fmtW(p.prev)}</span></button>`).join(''):'<div class="empty">Beat your best weight on any lift and it shows up here.</div>'}</div></section>`;
