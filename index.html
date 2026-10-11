@@ -202,7 +202,7 @@ function trained(doc){
 }
 
 // ---------- State ----------
-const TODAY=iso(new Date());
+let TODAY=iso(new Date());
 let ready=false, localOnly=false;
 let sessions={};            // date -> doc (from the store)
 let curDate=TODAY, cur=null;
@@ -587,6 +587,9 @@ $('log').addEventListener('change',ev=>{if(ev.target.dataset&&ev.target.dataset.
 $('days').addEventListener('click',ev=>{
   const b=ev.target.closest('button[data-day]'); if(!b||!cur) return;
   const d=+b.dataset.day; if(d===cur.plan) return;
+  // don't silently relabel a day that already has lifts logged under another workout
+  const logged=Object.entries(cur.ex).some(([n,e])=>n!=='100 Pushups'&&n!=='Pushup Test'&&workSets(e).length);
+  if(logged&&!confirm(fmtLong(curDate)+' already has '+PLAN[cur.plan][0]+' logged. Relabel this day as '+DAYS[d]+' \u00b7 '+PLAN[d][0]+'?')) return;
   cur.plan=d; if(hasData(cur)||cur.bw!=null) changed(); renderHeader(); renderLog();
 });
 $('prev').onclick=()=>switchDate(addDays(curDate,-1));
@@ -743,12 +746,20 @@ async function sync(){
     localOnly=true; setStatus('retry');
   }finally{syncing=false}
 }
+// New day while the app sat open in the background (iPhone home-screen apps resume without reloading): move Today forward.
+async function rollDay(){
+  const t=iso(new Date()); if(t===TODAY) return;
+  const wasToday=curDate===TODAY; TODAY=t;
+  if(wasToday){clearTimeout(saveTimer); await flush(); curDate=t; loadCur()}
+  renderAll();
+}
 sync();
-document.addEventListener('visibilitychange',()=>{
+document.addEventListener('visibilitychange',async()=>{
   if(document.visibilityState==='hidden'){clearTimeout(saveTimer); flush()}
-  else sync();
+  else {await rollDay(); sync()}
 });
-setInterval(()=>{if(document.visibilityState==='visible'&&!dirty) sync()},90000);
+window.addEventListener('pageshow',()=>{rollDay()});
+setInterval(async()=>{await rollDay(); if(document.visibilityState==='visible'&&!dirty) sync()},90000);
 </script>
 </body>
 </html>
