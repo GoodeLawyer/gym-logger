@@ -204,7 +204,7 @@ function hasData(doc){
 }
 function trained(doc){
   if(!doc||!doc.ex) return false;
-  return Object.entries(doc.ex).some(([n,e])=>n!=='100 Pushups'&&n!=='Pushup Test'&&workSets(e).length) || (doc.plan>=1&&doc.plan<=5&&hasData(doc));
+  return Object.entries(doc.ex).some(([n,e])=>n!=='100 Pushups'&&n!=='Pushup Test'&&workSets(e).length) || (doc.plan>=1&&doc.plan<=5&&hasData({ex:Object.fromEntries(Object.entries(doc.ex).filter(([n])=>n!=='100 Pushups'&&n!=='Pushup Test'))}));
 }
 
 // ---------- State ----------
@@ -385,6 +385,22 @@ function puPlace(n,after){
   return {wk:after>=2?2:1,col:col(n,5,10)};
 }
 function puSets(wk,day,col){const d=PU[wk][day]; return {rest:d.rest,sets:d.c[col-1]}}
+const PU_START='2026-10-11'; // first pushup day
+function puNextDate(after){let d=addDays(after,1); while(!PU_DAYS.includes(pdate(d).getDay())) d=addDays(d,1); return d}
+function puNext(after){
+  // the next pushup workout after `after`, counting everything logged so far (including today's unsaved entries)
+  const d=puNextDate(after), day=pdate(d).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  const saved=sessions; if(typeof cur!=='undefined'&&cur&&cur.date) sessions={...sessions,[cur.date]:cur};
+  let st; try{st=puState(d)}finally{sessions=saved}
+  if(st.done) return {d,day,title:'Program complete',sets:''};
+  if(st.test) return {d,day,title:st.test.after===6?'Final 100 test':'Exhaustion test (after Week '+st.test.after+')',sets:'one max set'};
+  const t=puSets(st.wk,st.day,st.col);
+  return {d,day,title:'Week '+st.wk+' · Day '+st.day+' · Column '+st.col,sets:t.sets.slice(0,-1).join(', ')+', '+t.sets[t.sets.length-1]+'+ · rest '+t.rest+'s'};
+}
+function puNextLabel(){
+  const t=sessions[TODAY], doneToday=t&&t.ex&&(t.ex[PU_KEY]||t.ex[PU_TEST]);
+  return PU_DAYS.includes(pdate(TODAY).getDay())&&!doneToday?'today':puNext(TODAY).day;
+}
 function puHit(p){
   // every prescribed set reached its target (last set: at least the minimum)
   if(!p||!p.wk) return false;
@@ -445,9 +461,10 @@ function puCardHTML(){
     const allIn=e.sets.length>=sets.length&&e.sets.slice(0,sets.length).every(x=>x&&x.r!=null);
     if(allIn) h+=`<div class="nohist">${ok?(pt.day<3?'Done. Next time: Day '+(pt.day+1)+'.':(PU_TEST_AFTER.includes(pt.wk)?'Week done. Next time: exhaustion test.':'Week done. Next time: Week '+(pt.wk+1)+', Day 1.')):'Short of the targets, so next time repeats this day. That’s normal.'}</div>`;
   }
+  if(curDate===TODAY&&e.sets&&e.sets.some(x=>x&&x.r!=null)){const nx=puNext(TODAY); h+=`<div class="nohist">Next pushup day: <b>${esc(nx.day)}</b> · ${esc(nx.title)}${nx.sets?' · '+esc(nx.sets):''}</div>`}
   return h;
 }
-function puShowToday(){return PU_DAYS.includes(pdate(curDate).getDay())||!!cur.ex[PU_KEY]||!!cur.ex[PU_TEST]}
+function puShowToday(){return (PU_DAYS.includes(pdate(curDate).getDay())&&curDate>=PU_START)||!!cur.ex[PU_KEY]||!!cur.ex[PU_TEST]}
 function puEntry(){const pt=puToday(); const e=entry(PU_KEY); e.wk=pt.wk; e.day=pt.day; e.col=pt.col; e.sets=e.sets||[]; return {e,pt}}
 function puInput(k,v){
   if(k==='test'){const pt=puToday(); const t=entry(PU_TEST); t.after=pt.after; t.sets=[{w:0,r:v}]; return}
@@ -565,6 +582,7 @@ function renderLog(){
     </div></div>`;
   exs.forEach((def,i)=>{h+=`<div class="card" data-ex="${i}">${cardHTML(def,i)}</div>`});
   if(puShowToday()) h+=`<div class="card" data-pu="1">${puCardHTML()}</div>`;
+  else if(curDate===TODAY){const nx=puNext(TODAY); h+=`<div class="card"><div class="exhead"><span class="exname">100 Pushups</span><span class="target">next ${esc(nx.day)}</span></div><div class="nohist"><b>${esc(nx.title)}</b>${nx.sets?' · '+esc(nx.sets):''}</div></div>`}
   h+=`</div>`;
   el.innerHTML=h;
   exs.forEach((_,i)=>weightPlaceholders(i));
@@ -644,9 +662,8 @@ $('log').addEventListener('change',ev=>{if(ev.target.dataset&&ev.target.dataset.
 $('days').addEventListener('click',ev=>{
   const b=ev.target.closest('button[data-day]'); if(!b||!cur) return;
   const d=+b.dataset.day; if(d===cur.plan) return;
-  // don't silently relabel a day that already has lifts logged under another workout
-  const logged=Object.entries(cur.ex).some(([n,e])=>n!=='100 Pushups'&&n!=='Pushup Test'&&workSets(e).length);
-  if(logged&&!confirm(fmtLong(curDate)+' already has '+PLAN[cur.plan][0]+' logged. Relabel this day as '+DAYS[d]+' \u00b7 '+PLAN[d][0]+'?')) return;
+  // these buttons change which workout this date shows; don't silently relabel a day that already has entries
+  if(hasData(cur)&&!confirm(fmtLong(curDate)+' already has entries under '+PLAN[cur.plan][0]+'. Relabel this date as '+DAYS[d]+' \u00b7 '+PLAN[d][0]+'?\n\n(To look at a different date, use the \u2039 \u203a arrows instead.)')) return;
   cur.plan=d; if(hasData(cur)||cur.bw!=null) changed(); renderHeader(); renderLog();
 });
 $('prev').onclick=()=>switchDate(addDays(curDate,-1));
@@ -763,7 +780,7 @@ function renderProg(){
   }else h+=`<div class="empty">Log a lift to see it here.</div>`;
   h+=`</section>`;
   {const ps=puState(addDays(TODAY,1)); const pct=Math.min(100,ps.best||0);
-   h+=`<section><h2>100 Pushups</h2><div class="kpi"><div class="k">Best set</div><div class="v">${ps.best||'—'}<span class="s"> / 100</span></div><div class="pubar"><span style="width:${pct}%"></span></div><div class="s">${ps.done?'Goal reached.':ps.test?'Next: '+(ps.test.after===6?'final 100 test':'exhaustion test'):'Next: Week '+ps.wk+', Day '+ps.day+', Column '+ps.col} · Sun, Wed, Fri</div></div></section>`;}
+   h+=`<section><h2>100 Pushups</h2><div class="kpi"><div class="k">Best set</div><div class="v">${ps.best||'—'}<span class="s"> / 100</span></div><div class="pubar"><span style="width:${pct}%"></span></div><div class="s">${ps.done?'Goal reached.':ps.test?'Next: '+(ps.test.after===6?'final 100 test':'exhaustion test'):'Next: Week '+ps.wk+', Day '+ps.day+', Column '+ps.col}${ps.done?'':' · '+esc(puNextLabel())} · Sun, Wed, Fri</div></div></section>`;}
   if(bfs.length>=2) h+=`<section><h2>Body fat</h2><div class="chart">${lineChart(bfs,{label:'Body fat percentage over time',minPad:1})}</div></section>`;
   const prs=prList(docs);
   h+=`<section><h2>Recent PRs</h2><div class="recent">${prs.length?prs.map(p=>`<button data-go="${p.d}"><span>${esc(p.n)}<br><span class="nohist">${fmtLong(p.d)}</span></span><span class="r">${prTxt(p)}</span></button>`).join(''):'<div class="empty">Beat your best weight, or your reps at a weight, and it shows up here.</div>'}</div></section>`;
